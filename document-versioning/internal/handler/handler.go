@@ -84,16 +84,23 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 // 5. Return the document as api.DocumentResponse
 // 6. Handle errors (404 for not found)
 func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.GetDocumentParams) {
-	// The ID is already parsed by the generated wrapper code
-	// Use id directly (it's a uuid.UUID under the hood)
+	// TODO: Check params.Version to see if a specific version was requested
 
-	_ = id // Use this parsed ID
+	// no version specified, serve the latest version
+	doc, err := h.store.GetCurrent(c.Request.Context(), id)
+	if err != nil {
+		// TODO: should check if the error is not found or some other error
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Implement document retrieval
-	// Check params.Version to see if a specific version was requested
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
 	})
 }
 

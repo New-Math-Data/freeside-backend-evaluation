@@ -96,25 +96,24 @@ func (s *DocumentStore) Create(ctx context.Context, name string, content map[str
 }
 
 // GetCurrent retrieves the current version of a document
-// TODO: Implement this method
 // 1. Get the document record to find the current version
 // 2. Call GetAtVersion with the current version
 func (s *DocumentStore) GetCurrent(ctx context.Context, id uuid.UUID) (*Document, error) {
 	var docID pgtype.UUID
 	setUUID(&docID, id)
 
-	// Get document metadata
 	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
 
-	// TODO: Reconstruct the document at current version
-	// Call GetAtVersion(ctx, id, int(doc.CurrentVersion))
-
-	_ = doc // Use this
-
-	return nil, fmt.Errorf("not implemented")
+	// TODO: need to set Content here
+	return &Document{
+		ID:             id,
+		Name:           doc.Name,
+		CurrentVersion: int(doc.CurrentVersion),
+		CreatedAt:      doc.CreatedAt.Time,
+	}, nil
 }
 
 // GetAtVersion retrieves a document at a specific version
