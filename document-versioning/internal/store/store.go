@@ -209,6 +209,11 @@ func (s *DocumentStore) Update(ctx context.Context, id uuid.UUID, content map[st
 		return nil, fmt.Errorf("failed to create patch: %w", err)
 	}
 
+	if len(forwardPatch) == 0 {
+		// No changes, return current document
+		return currentDoc, nil
+	}
+
 	newVersion := currentDoc.CurrentVersion + 1
 	docID := pgtype.UUID{}
 	setUUID(&docID, id)
@@ -302,6 +307,10 @@ func createPatch(base, target []byte) ([]byte, []byte, error) {
 	patch, err := jsondiff.CompareJSON(base, target, jsondiff.Invertible())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create patch: %w", err)
+	}
+	if len(patch) == 0 {
+		// optimization: if there are no changes, return empty
+		return []byte(""), []byte(""), nil
 	}
 	invertedPatch, err := patch.Invert()
 	if err != nil {
