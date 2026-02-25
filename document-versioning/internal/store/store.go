@@ -9,7 +9,24 @@ import (
 	"document-versioning/internal/database"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func convertUUID(source pgtype.UUID) (uuid.UUID, error) {
+	if !source.Valid {
+		return uuid.Nil, fmt.Errorf("invalid pgtype.UUID")
+	}
+	result, err := uuid.FromBytes(source.Bytes[:])
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid UUID: %w", err)
+	}
+	return result, nil
+}
+
+func setUUID(dest *pgtype.UUID, value uuid.UUID) {
+	dest.Bytes = value
+	dest.Valid = true
+}
 
 // Document represents a document with its current content
 type Document struct {
@@ -64,12 +81,17 @@ func (s *DocumentStore) Create(ctx context.Context, name string, content map[str
 
 	_ = contentBytes // Use this
 
+	id, err := convertUUID(doc.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert document ID: %w", err)
+	}
+
 	return &Document{
-		ID:             doc.ID,
+		ID:             id,
 		Name:           doc.Name,
 		CurrentVersion: int(doc.CurrentVersion),
 		Content:        content,
-		CreatedAt:      doc.CreatedAt,
+		CreatedAt:      doc.CreatedAt.Time,
 	}, nil
 }
 
@@ -78,8 +100,11 @@ func (s *DocumentStore) Create(ctx context.Context, name string, content map[str
 // 1. Get the document record to find the current version
 // 2. Call GetAtVersion with the current version
 func (s *DocumentStore) GetCurrent(ctx context.Context, id uuid.UUID) (*Document, error) {
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
 	// Get document metadata
-	doc, err := s.queries.GetDocument(ctx, id)
+	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
@@ -99,8 +124,11 @@ func (s *DocumentStore) GetCurrent(ctx context.Context, id uuid.UUID) (*Document
 // 3. Apply each patch in order (version 1, 2, ..., N)
 // 4. Return the reconstructed document
 func (s *DocumentStore) GetAtVersion(ctx context.Context, id uuid.UUID, version int) (*Document, error) {
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
 	// Get document metadata
-	doc, err := s.queries.GetDocument(ctx, id)
+	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
@@ -168,8 +196,11 @@ func (s *DocumentStore) Update(ctx context.Context, id uuid.UUID, content map[st
 // 1. Get all versions for the document
 // 2. Return version metadata (version number, created_at)
 func (s *DocumentStore) ListVersions(ctx context.Context, id uuid.UUID) (int, []VersionInfo, error) {
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
 	// Verify document exists
-	doc, err := s.queries.GetDocument(ctx, id)
+	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return 0, nil, fmt.Errorf("document not found: %w", err)
 	}
@@ -208,13 +239,14 @@ func (s *DocumentStore) Revert(ctx context.Context, id uuid.UUID, targetVersion 
 // createPatch creates a JSON patch from base to target, returning both
 // the forward patch and inverted patch
 func createPatch(base, target []byte) (patch []byte, invertedPatch []byte, err error) {
-	// Use jsondiff to create an invertible patch
+	// TODO: Use jsondiff to create an invertible patch
+	//return patchBytes, invertedBytes, nil
 
-	return patchBytes, invertedBytes, nil
+	return nil, nil, fmt.Errorf("not implemented")
 }
 
 // applyPatch applies a JSON patch to a document
 func applyPatch(doc []byte, patchBytes []byte) ([]byte, error) {
-
-	return result, nil
+	// TODO: implement me
+	return nil, fmt.Errorf("not implemented")
 }
