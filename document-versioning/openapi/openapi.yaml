@@ -1,0 +1,319 @@
+openapi: 3.0.3
+info:
+  title: Document Versioning API
+  description: |
+    A REST API for storing and versioning JSON documents using RFC 6902 JSON Patch.
+    
+    This API allows you to:
+    - Create and update JSON documents with automatic version tracking
+    - Retrieve documents at any historical version
+    - View version history
+    - Revert to previous versions
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/documents:
+    post:
+      summary: Create a new document
+      description: Creates a new document with version 1
+      operationId: createDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDocumentRequest'
+      responses:
+        '201':
+          description: Document created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/documents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Document UUID
+        schema:
+          type: string
+          format: uuid
+    
+    get:
+      summary: Get a document
+      description: |
+        Retrieves a document. By default returns the current version.
+        Use the `version` query parameter to retrieve a specific historical version.
+      operationId: getDocument
+      parameters:
+        - name: version
+          in: query
+          required: false
+          description: Specific version number to retrieve
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Document retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '404':
+          description: Document or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    
+    put:
+      summary: Update a document
+      description: |
+        Updates a document, creating a new version. The system automatically
+        computes and stores the JSON patch between versions.
+      operationId: updateDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocumentRequest'
+      responses:
+        '200':
+          description: Document updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/documents/{id}/versions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Document UUID
+        schema:
+          type: string
+          format: uuid
+    
+    get:
+      summary: List document versions
+      description: Returns the version history for a document
+      operationId: listVersions
+      responses:
+        '200':
+          description: Version history retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionListResponse'
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/documents/{id}/revert:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Document UUID
+        schema:
+          type: string
+          format: uuid
+    
+    post:
+      summary: Revert to a specific version
+      description: |
+        Reverts the document to a specific version by creating a new version
+        with the content from the target version.
+      operationId: revertDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertRequest'
+      responses:
+        '200':
+          description: Document reverted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Document or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: "ok"
+
+    CreateDocumentRequest:
+      type: object
+      required:
+        - name
+        - content
+      properties:
+        name:
+          type: string
+          description: Human-readable name for the document
+          example: "My Document"
+        content:
+          type: object
+          description: The JSON content of the document
+          additionalProperties: true
+          example:
+            title: "Example"
+            data:
+              value: 42
+
+    UpdateDocumentRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: object
+          description: The new JSON content of the document
+          additionalProperties: true
+          example:
+            title: "Updated Example"
+            data:
+              value: 100
+
+    RevertRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: The version number to revert to
+          example: 2
+
+    DocumentResponse:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - content
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique document identifier
+        name:
+          type: string
+          description: Document name
+        version:
+          type: integer
+          description: Current version number
+        content:
+          type: object
+          description: The JSON content of the document
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+          description: Document creation timestamp
+
+    VersionInfo:
+      type: object
+      required:
+        - version
+        - created_at
+      properties:
+        version:
+          type: integer
+          description: Version number
+        created_at:
+          type: string
+          format: date-time
+          description: When this version was created
+
+    VersionListResponse:
+      type: object
+      required:
+        - document_id
+        - current_version
+        - versions
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        current_version:
+          type: integer
+          description: The current (latest) version number
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionInfo'
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "document not found"

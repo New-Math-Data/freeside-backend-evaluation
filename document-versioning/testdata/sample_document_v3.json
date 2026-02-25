@@ -1,0 +1,22 @@
+{
+  "title": "Infrastructure Asset - Decommissioned",
+  "type": "electrical_transformer",
+  "location": {
+    "latitude": 40.7128,
+    "longitude": -74.0060,
+    "address": "123 Main Street",
+    "zone": "commercial"
+  },
+  "specifications": {
+    "voltage_rating": "13.8 kV",
+    "capacity": "750 kVA",
+    "manufacturer": "General Electric",
+    "model": "GE-TR-750",
+    "installation_date": "2020-03-15",
+    "last_maintenance": "2024-01-10",
+    "decommission_date": "2025-06-01"
+  },
+  "status": "decommissioned",
+  "replacement_id": "asset-789",
+  "tags": ["decommissioned", "downtown"]
+}

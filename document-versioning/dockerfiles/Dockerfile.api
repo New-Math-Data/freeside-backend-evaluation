@@ -1,0 +1,65 @@
+# Multi-stage Dockerfile for document-versioning API
+
+# Build stage
+FROM golang:1.24.1-alpine AS builder
+
+# Install git and ca-certificates (needed for fetching dependencies and HTTPS)
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /app
+
+# Copy go.mod and go.sum first (for better layer caching)
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy the entire source code
+COPY . .
+
+# Build the application
+# CGO_ENABLED=0 for static binary, GOOS=linux for Linux target
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags '-extldflags "-static"' \
+    -o server \
+    ./cmd/server
+
+# Runtime stage
+FROM alpine:3.20
+
+# Install ca-certificates, tzdata for HTTPS and timezone support, and curl for health checks
+RUN apk --no-cache add ca-certificates tzdata curl
+
+# Create a non-root user
+RUN addgroup -g 1001 -S appuser && \
+    adduser -u 1001 -S appuser -G appuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /app/server .
+
+# Copy the config file
+COPY env.yaml ./env.yaml
+
+# Change ownership to non-root user
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose the default port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Set environment variables with defaults
+ENV PORT=8080
+
+# Run the application
+CMD ["./server"]

@@ -1,0 +1,2 @@
+# This directory contains oapi-codegen generated code
+# Run `make generate` to generate the API package

@@ -1,0 +1,2 @@
+# This directory contains sqlc-generated code
+# Run `make generate` to generate the database package

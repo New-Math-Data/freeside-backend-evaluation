@@ -1,0 +1,18 @@
+{
+  "title": "Infrastructure Asset",
+  "type": "electrical_transformer",
+  "location": {
+    "latitude": 40.7128,
+    "longitude": -74.0060,
+    "address": "123 Main Street"
+  },
+  "specifications": {
+    "voltage_rating": "13.8 kV",
+    "capacity": "500 kVA",
+    "manufacturer": "General Electric",
+    "model": "GE-TR-500",
+    "installation_date": "2020-03-15"
+  },
+  "status": "operational",
+  "tags": ["critical", "downtown", "primary-feed"]
+}
