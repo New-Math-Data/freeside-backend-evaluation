@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"document-versioning/internal/database"
@@ -244,6 +245,14 @@ func (s *DocumentStore) Revert(ctx context.Context, id uuid.UUID, targetVersion 
 
 // Helper functions for JSON patch operations
 
+// jsondiff Patch.String() returns results like "patch1\npatch2\npatch3", but
+// to store them in a jsonb column we need to convert it to a valid JSON array
+// eg. ["patch1","patch2","patch3"]
+func convertPatchToJsonArray(patch jsondiff.Patch) []byte {
+	lines := strings.Split(patch.String(), "\n")
+	return []byte(fmt.Sprintf("[%s]", strings.Join(lines, ",")))
+}
+
 // createPatch creates a JSON patch from base to target, returning both
 // the forward patch and inverted patch
 func createPatch(base, target []byte) ([]byte, []byte, error) {
@@ -255,7 +264,7 @@ func createPatch(base, target []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to invert patch: %w", err)
 	}
-	return []byte(patch.String()), []byte(invertedPatch.String()), nil
+	return convertPatchToJsonArray(patch), convertPatchToJsonArray(invertedPatch), nil
 }
 
 // applyPatch applies a JSON patch to a document
