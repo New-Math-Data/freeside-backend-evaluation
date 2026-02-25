@@ -130,18 +130,31 @@ func (h *Handler) UpdateDocument(c *gin.Context, id openapi_types.UUID) {
 }
 
 // ListVersions returns the version history for a document
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Call h.store.ListVersions()
 // 3. Return the version list as api.VersionListResponse
 // 4. Handle errors (404 for not found)
 func (h *Handler) ListVersions(c *gin.Context, id openapi_types.UUID) {
-	_ = id // Use this parsed ID
+	count, storedVersions, err := h.store.ListVersions(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to list versions
+	var versions []api.VersionInfo
+	for _, v := range storedVersions {
+		versions = append(versions, api.VersionInfo{
+			Version:   v.Version,
+			CreatedAt: v.CreatedAt,
+		})
+	}
 
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.VersionListResponse{
+		CurrentVersion: count,
+		DocumentId:     id,
+		Versions:       versions,
 	})
 }
 

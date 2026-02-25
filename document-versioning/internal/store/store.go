@@ -201,7 +201,6 @@ func (s *DocumentStore) Update(ctx context.Context, id uuid.UUID, content map[st
 }
 
 // ListVersions returns the version history for a document
-// TODO: Implement this method
 // 1. Get all versions for the document
 // 2. Return version metadata (version number, created_at)
 func (s *DocumentStore) ListVersions(ctx context.Context, id uuid.UUID) (int, []VersionInfo, error) {
@@ -209,17 +208,25 @@ func (s *DocumentStore) ListVersions(ctx context.Context, id uuid.UUID) (int, []
 	setUUID(&docID, id)
 
 	// Verify document exists
-	doc, err := s.queries.GetDocument(ctx, docID)
+	_, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return 0, nil, fmt.Errorf("document not found: %w", err)
 	}
 
-	// TODO: Get version history using s.queries.GetVersionHistory(ctx, id)
-	// Convert to []VersionInfo
+	rows, err := s.queries.GetVersionHistory(ctx, docID)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to get version history: %w", err)
+	}
 
-	_ = doc // Use this
+	var versions []VersionInfo
+	for _, v := range rows {
+		versions = append(versions, VersionInfo{
+			Version:   int(v.Version),
+			CreatedAt: v.CreatedAt.Time,
+		})
+	}
 
-	return 0, nil, fmt.Errorf("not implemented")
+	return len(versions), versions, nil
 }
 
 // Revert reverts a document to a specific version by creating a new version
