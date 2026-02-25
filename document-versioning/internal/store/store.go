@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/wI2L/jsondiff"
 )
 
 func convertUUID(source pgtype.UUID) (uuid.UUID, error) {
@@ -56,7 +57,6 @@ func NewDocumentStore(queries *database.Queries) *DocumentStore {
 }
 
 // Create creates a new document with the given content as version 1
-// TODO: Implement this method
 // 1. Create the document record in the database
 // 2. Marshal the content to JSON
 // 3. Create a patch from empty {} to the content (this is version 1)
@@ -75,11 +75,20 @@ func (s *DocumentStore) Create(ctx context.Context, name string, content map[str
 		return nil, fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	// TODO: Create the initial patch from {} to content
-	// Use createPatch() helper function below
-	// Store the patch using s.queries.CreateDocumentVersion()
-
-	_ = contentBytes // Use this
+	// Store the initial doc version
+	patch, invertedPatch, err := createPatch([]byte("{}"), contentBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create patch: %w", err)
+	}
+	_, err = s.queries.CreateDocumentVersion(ctx, database.CreateDocumentVersionParams{
+		DocumentID:    doc.ID,
+		Version:       1,
+		Patch:         patch,
+		InvertedPatch: invertedPatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document version: %w", err)
+	}
 
 	id, err := convertUUID(doc.ID)
 	if err != nil {
@@ -237,11 +246,16 @@ func (s *DocumentStore) Revert(ctx context.Context, id uuid.UUID, targetVersion 
 
 // createPatch creates a JSON patch from base to target, returning both
 // the forward patch and inverted patch
-func createPatch(base, target []byte) (patch []byte, invertedPatch []byte, err error) {
-	// TODO: Use jsondiff to create an invertible patch
-	//return patchBytes, invertedBytes, nil
-
-	return nil, nil, fmt.Errorf("not implemented")
+func createPatch(base, target []byte) ([]byte, []byte, error) {
+	patch, err := jsondiff.CompareJSON(base, target, jsondiff.Invertible())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create patch: %w", err)
+	}
+	invertedPatch, err := patch.Invert()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to invert patch: %w", err)
+	}
+	return []byte(patch.String()), []byte(invertedPatch.String()), nil
 }
 
 // applyPatch applies a JSON patch to a document
