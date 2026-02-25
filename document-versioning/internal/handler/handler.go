@@ -33,7 +33,6 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 }
 
 // CreateDocument creates a new document
-// TODO: Implement this handler
 // 1. Parse the request body into api.CreateDocumentRequest
 // 2. Call h.store.Create() with the name and content
 // 3. Return the created document as api.DocumentResponse with status 201
@@ -47,11 +46,32 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 		return
 	}
 
-	// TODO: Call the store to create the document
-	// doc, err := h.store.Create(c.Request.Context(), req.Name, req.Content)
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Error: "name is required",
+		})
+		return
+	}
+	if req.Content == nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Error: "content is required",
+		})
+		return
+	}
 
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	doc, err := h.store.Create(c.Request.Context(), req.Name, req.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			Error: "failed to create document: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
 	})
 }
 
