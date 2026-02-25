@@ -112,7 +112,6 @@ func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.
 }
 
 // UpdateDocument updates a document, creating a new version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Parse the request body into api.UpdateDocumentRequest
 // 3. Call h.store.Update() with the ID and new content
@@ -127,12 +126,20 @@ func (h *Handler) UpdateDocument(c *gin.Context, id openapi_types.UUID) {
 		return
 	}
 
-	_ = id // Use this parsed ID
+	doc, err := h.store.Update(c.Request.Context(), id, req.Content)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to update the document
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
+		Version:   doc.CurrentVersion,
 	})
 }
 

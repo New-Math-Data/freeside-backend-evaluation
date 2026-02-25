@@ -181,7 +181,6 @@ func (s *DocumentStore) GetAtVersion(ctx context.Context, id uuid.UUID, version 
 }
 
 // Update updates a document with new content, creating a new version
-// TODO: Implement this method
 // 1. Get the current document content
 // 2. Compute the patch from current to new content
 // 3. Store the new version with the patch
@@ -205,20 +204,39 @@ func (s *DocumentStore) Update(ctx context.Context, id uuid.UUID, content map[st
 		return nil, fmt.Errorf("failed to marshal new content: %w", err)
 	}
 
-	// TODO: Create patch from current to new
-	// Use createPatch(currentBytes, newBytes)
+	forwardPatch, invertedPatch, err := createPatch(currentBytes, newBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create patch: %w", err)
+	}
 
-	// TODO: Create new version record
-	// newVersion := currentDoc.CurrentVersion + 1
-	// s.queries.CreateDocumentVersion(...)
+	newVersion := currentDoc.CurrentVersion + 1
+	docID := pgtype.UUID{}
+	setUUID(&docID, id)
+	_, err = s.queries.CreateDocumentVersion(ctx, database.CreateDocumentVersionParams{
+		DocumentID:    docID,
+		Version:       int32(newVersion),
+		Patch:         forwardPatch,
+		InvertedPatch: invertedPatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document version: %w", err)
+	}
 
-	// TODO: Update document's current version
-	// s.queries.UpdateDocumentVersion(...)
+	err = s.queries.UpdateDocumentVersion(ctx, database.UpdateDocumentVersionParams{
+		ID:             docID,
+		CurrentVersion: int32(newVersion),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document version: %w", err)
+	}
 
-	_ = currentBytes // Use these
-	_ = newBytes
-
-	return nil, fmt.Errorf("not implemented")
+	return &Document{
+		ID:             id,
+		Name:           currentDoc.Name,
+		CurrentVersion: newVersion,
+		Content:        content,
+		CreatedAt:      currentDoc.CreatedAt,
+	}, nil
 }
 
 // ListVersions returns the version history for a document
