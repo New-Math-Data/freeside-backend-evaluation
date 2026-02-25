@@ -95,7 +95,6 @@ func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.
 		version = doc.CurrentVersion
 	}
 	if err != nil {
-		// TODO: should check if the error is not found or some other error
 		c.JSON(http.StatusNotFound, api.ErrorResponse{
 			Error: "document not found: " + err.Error(),
 		})
@@ -173,7 +172,6 @@ func (h *Handler) ListVersions(c *gin.Context, id openapi_types.UUID) {
 }
 
 // RevertDocument reverts a document to a specific version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Parse the request body into api.RevertRequest
 // 3. Call h.store.Revert() with the ID and target version
@@ -188,11 +186,19 @@ func (h *Handler) RevertDocument(c *gin.Context, id openapi_types.UUID) {
 		return
 	}
 
-	_ = id // Use this parsed ID
+	doc, err := h.store.Revert(c.Request.Context(), id, req.Version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found or version invalid: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to revert the document
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
+		Version:   doc.CurrentVersion,
 	})
 }

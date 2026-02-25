@@ -270,23 +270,20 @@ func (s *DocumentStore) ListVersions(ctx context.Context, id uuid.UUID) (int, []
 
 // Revert reverts a document to a specific version by creating a new version
 // with the content from the target version
-// TODO: Implement this method
 // 1. Get the document at the target version
 // 2. Create a new version with that content (like Update)
 func (s *DocumentStore) Revert(ctx context.Context, id uuid.UUID, targetVersion int) (*Document, error) {
-	// Get document at target version
 	targetDoc, err := s.GetAtVersion(ctx, id, targetVersion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get target version: %w", err)
 	}
 
-	// TODO: Update the document with the target content
-	// This creates a new version with the reverted content
-	// Use s.Update(ctx, id, targetDoc.Content)
+	doc, err := s.Update(ctx, id, targetDoc.Content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document: %w", err)
+	}
 
-	_ = targetDoc // Use this
-
-	return nil, fmt.Errorf("not implemented")
+	return doc, nil
 }
 
 // Helper functions for JSON patch operations
