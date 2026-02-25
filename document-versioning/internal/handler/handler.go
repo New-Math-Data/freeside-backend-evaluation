@@ -76,7 +76,6 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 }
 
 // GetDocument retrieves a document, optionally at a specific version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Check if a version query parameter was provided (params.Version)
 // 3. If version provided, call h.store.GetAtVersion()
@@ -84,10 +83,17 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 // 5. Return the document as api.DocumentResponse
 // 6. Handle errors (404 for not found)
 func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.GetDocumentParams) {
-	// TODO: Check params.Version to see if a specific version was requested
+	var doc *store.Document
+	var err error
+	var version int
 
-	// no version specified, serve the latest version
-	doc, err := h.store.GetCurrent(c.Request.Context(), id)
+	if params.Version != nil {
+		doc, err = h.store.GetAtVersion(c.Request.Context(), id, *params.Version)
+		version = *params.Version
+	} else {
+		doc, err = h.store.GetCurrent(c.Request.Context(), id)
+		version = doc.CurrentVersion
+	}
 	if err != nil {
 		// TODO: should check if the error is not found or some other error
 		c.JSON(http.StatusNotFound, api.ErrorResponse{
@@ -101,6 +107,7 @@ func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.
 		Name:      doc.Name,
 		Content:   doc.Content,
 		CreatedAt: doc.CreatedAt,
+		Version:   version,
 	})
 }
 

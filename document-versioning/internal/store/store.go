@@ -9,6 +9,7 @@ import (
 
 	"document-versioning/internal/database"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/wI2L/jsondiff"
@@ -117,17 +118,10 @@ func (s *DocumentStore) GetCurrent(ctx context.Context, id uuid.UUID) (*Document
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
 
-	// TODO: need to set Content here
-	return &Document{
-		ID:             id,
-		Name:           doc.Name,
-		CurrentVersion: int(doc.CurrentVersion),
-		CreatedAt:      doc.CreatedAt.Time,
-	}, nil
+	return s.GetAtVersion(ctx, id, int(doc.CurrentVersion))
 }
 
 // GetAtVersion retrieves a document at a specific version
-// TODO: Implement this method
 // 1. Get all patches up to and including the target version
 // 2. Start with an empty document {}
 // 3. Apply each patch in order (version 1, 2, ..., N)
@@ -146,17 +140,44 @@ func (s *DocumentStore) GetAtVersion(ctx context.Context, id uuid.UUID, version 
 		return nil, fmt.Errorf("version %d not found", version)
 	}
 
-	// TODO: Get all versions up to the requested version
-	// Use s.queries.GetDocumentVersions(ctx, id)
+	versions, err := s.queries.GetDocumentVersions(ctx, docID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document versions: %w", err)
+	}
+
+	// sanity check - versions must be in order
+	for i, v := range versions {
+		if int(v.Version) != i+1 {
+			return nil, fmt.Errorf("invalid version history: expected version %d but got %d", i+1, v.Version)
+		}
+	}
+
 	// Filter to only include versions <= requested version
+	versions = versions[:version]
 
-	// TODO: Reconstruct the document by applying patches
-	// Start with base := []byte(`{}`)
-	// For each version, apply the patch using applyPatch() helper
+	// Reconstruct the document by applying patches
+	content := []byte(`{}`)
+	for _, v := range versions {
+		var err error
+		content, err = applyPatch(content, v.Patch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply patch for version %d: %w", v.Version, err)
+		}
+	}
 
-	_ = doc // Use this
+	var rawJson map[string]interface{}
+	err = json.Unmarshal(content, &rawJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal content: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	return &Document{
+		ID:             id,
+		Name:           doc.Name,
+		CurrentVersion: version,
+		Content:        rawJson,
+		CreatedAt:      doc.CreatedAt.Time,
+	}, nil
 }
 
 // Update updates a document with new content, creating a new version
@@ -276,6 +297,13 @@ func createPatch(base, target []byte) ([]byte, []byte, error) {
 
 // applyPatch applies a JSON patch to a document
 func applyPatch(doc []byte, patchBytes []byte) ([]byte, error) {
-	// TODO: implement me
-	return nil, fmt.Errorf("not implemented")
+	patch, err := jsonpatch.DecodePatch(patchBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode patch: %w", err)
+	}
+	modified, err := patch.Apply(doc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply patch: %w", err)
+	}
+	return modified, nil
 }
