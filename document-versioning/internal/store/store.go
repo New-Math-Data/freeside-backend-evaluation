@@ -47,15 +47,35 @@ type VersionInfo struct {
 }
 
 // DocumentStore handles document storage and versioning
+// Queries defines the database operations needed by DocumentStore
+// This interface allows tests to provide mocks without depending on sqlc's struct.
+type Queries interface {
+	CreateDocument(ctx context.Context, name string) (database.Document, error)
+	CreateDocumentVersion(ctx context.Context, arg database.CreateDocumentVersionParams) (database.DocumentVersion, error)
+	GetDocument(ctx context.Context, id pgtype.UUID) (database.Document, error)
+	GetDocumentVersions(ctx context.Context, documentID pgtype.UUID) ([]database.DocumentVersion, error)
+	UpdateDocumentVersion(ctx context.Context, arg database.UpdateDocumentVersionParams) error
+	GetVersionHistory(ctx context.Context, documentID pgtype.UUID) ([]database.GetVersionHistoryRow, error)
+}
+
+// DocumentStore handles document storage and versioning
 type DocumentStore struct {
-	queries *database.Queries
+	queries Queries
+
+	// helpers that can be overridden in tests
+	getAtVersion func(context.Context, uuid.UUID, int) (*Document, error)
+	update       func(context.Context, uuid.UUID, map[string]interface{}) (*Document, error)
 }
 
 // NewDocumentStore creates a new DocumentStore
-func NewDocumentStore(queries *database.Queries) *DocumentStore {
-	return &DocumentStore{
+func NewDocumentStore(queries Queries) *DocumentStore {
+	s := &DocumentStore{
 		queries: queries,
 	}
+	// default helper implementations
+	s.getAtVersion = s.GetAtVersion
+	s.update = s.Update
+	return s
 }
 
 // Create creates a new document with the given content as version 1
