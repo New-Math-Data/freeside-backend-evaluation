@@ -33,7 +33,6 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 }
 
 // CreateDocument creates a new document
-// TODO: Implement this handler
 // 1. Parse the request body into api.CreateDocumentRequest
 // 2. Call h.store.Create() with the name and content
 // 3. Return the created document as api.DocumentResponse with status 201
@@ -47,16 +46,36 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 		return
 	}
 
-	// TODO: Call the store to create the document
-	// doc, err := h.store.Create(c.Request.Context(), req.Name, req.Content)
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Error: "name is required",
+		})
+		return
+	}
+	if req.Content == nil {
+		c.JSON(http.StatusBadRequest, api.ErrorResponse{
+			Error: "content is required",
+		})
+		return
+	}
 
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	doc, err := h.store.Create(c.Request.Context(), req.Name, req.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{
+			Error: "failed to create document: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
 	})
 }
 
 // GetDocument retrieves a document, optionally at a specific version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Check if a version query parameter was provided (params.Version)
 // 3. If version provided, call h.store.GetAtVersion()
@@ -64,21 +83,34 @@ func (h *Handler) CreateDocument(c *gin.Context) {
 // 5. Return the document as api.DocumentResponse
 // 6. Handle errors (404 for not found)
 func (h *Handler) GetDocument(c *gin.Context, id openapi_types.UUID, params api.GetDocumentParams) {
-	// The ID is already parsed by the generated wrapper code
-	// Use id directly (it's a uuid.UUID under the hood)
+	var doc *store.Document
+	var err error
+	var version int
 
-	_ = id // Use this parsed ID
+	if params.Version != nil {
+		doc, err = h.store.GetAtVersion(c.Request.Context(), id, *params.Version)
+		version = *params.Version
+	} else {
+		doc, err = h.store.GetCurrent(c.Request.Context(), id)
+		version = doc.CurrentVersion
+	}
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Implement document retrieval
-	// Check params.Version to see if a specific version was requested
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
+		Version:   version,
 	})
 }
 
 // UpdateDocument updates a document, creating a new version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Parse the request body into api.UpdateDocumentRequest
 // 3. Call h.store.Update() with the ID and new content
@@ -93,33 +125,53 @@ func (h *Handler) UpdateDocument(c *gin.Context, id openapi_types.UUID) {
 		return
 	}
 
-	_ = id // Use this parsed ID
+	doc, err := h.store.Update(c.Request.Context(), id, req.Content)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to update the document
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
+		Version:   doc.CurrentVersion,
 	})
 }
 
 // ListVersions returns the version history for a document
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Call h.store.ListVersions()
 // 3. Return the version list as api.VersionListResponse
 // 4. Handle errors (404 for not found)
 func (h *Handler) ListVersions(c *gin.Context, id openapi_types.UUID) {
-	_ = id // Use this parsed ID
+	count, storedVersions, err := h.store.ListVersions(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to list versions
+	var versions []api.VersionInfo
+	for _, v := range storedVersions {
+		versions = append(versions, api.VersionInfo{
+			Version:   v.Version,
+			CreatedAt: v.CreatedAt,
+		})
+	}
 
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.VersionListResponse{
+		CurrentVersion: count,
+		DocumentId:     id,
+		Versions:       versions,
 	})
 }
 
 // RevertDocument reverts a document to a specific version
-// TODO: Implement this handler
 // 1. The document ID is already parsed by the generated code
 // 2. Parse the request body into api.RevertRequest
 // 3. Call h.store.Revert() with the ID and target version
@@ -134,11 +186,19 @@ func (h *Handler) RevertDocument(c *gin.Context, id openapi_types.UUID) {
 		return
 	}
 
-	_ = id // Use this parsed ID
+	doc, err := h.store.Revert(c.Request.Context(), id, req.Version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, api.ErrorResponse{
+			Error: "document not found or version invalid: " + err.Error(),
+		})
+		return
+	}
 
-	// TODO: Call the store to revert the document
-
-	c.JSON(http.StatusNotImplemented, api.ErrorResponse{
-		Error: "not implemented - complete this handler",
+	c.JSON(http.StatusOK, api.DocumentResponse{
+		Id:        doc.ID,
+		Name:      doc.Name,
+		Content:   doc.Content,
+		CreatedAt: doc.CreatedAt,
+		Version:   doc.CurrentVersion,
 	})
 }

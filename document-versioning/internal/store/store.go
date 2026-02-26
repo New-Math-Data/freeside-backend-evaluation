@@ -4,12 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"document-versioning/internal/database"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/wI2L/jsondiff"
 )
+
+func convertUUID(source pgtype.UUID) (uuid.UUID, error) {
+	if !source.Valid {
+		return uuid.Nil, fmt.Errorf("invalid pgtype.UUID")
+	}
+	result, err := uuid.FromBytes(source.Bytes[:])
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid UUID: %w", err)
+	}
+	return result, nil
+}
+
+func setUUID(dest *pgtype.UUID, value uuid.UUID) {
+	dest.Bytes = value
+	dest.Valid = true
+}
 
 // Document represents a document with its current content
 type Document struct {
@@ -27,19 +47,38 @@ type VersionInfo struct {
 }
 
 // DocumentStore handles document storage and versioning
+// Queries defines the database operations needed by DocumentStore
+// This interface allows tests to provide mocks without depending on sqlc's struct.
+type Queries interface {
+	CreateDocument(ctx context.Context, name string) (database.Document, error)
+	CreateDocumentVersion(ctx context.Context, arg database.CreateDocumentVersionParams) (database.DocumentVersion, error)
+	GetDocument(ctx context.Context, id pgtype.UUID) (database.Document, error)
+	GetDocumentVersions(ctx context.Context, documentID pgtype.UUID) ([]database.DocumentVersion, error)
+	UpdateDocumentVersion(ctx context.Context, arg database.UpdateDocumentVersionParams) error
+	GetVersionHistory(ctx context.Context, documentID pgtype.UUID) ([]database.GetVersionHistoryRow, error)
+}
+
+// DocumentStore handles document storage and versioning
 type DocumentStore struct {
-	queries *database.Queries
+	queries Queries
+
+	// helpers that can be overridden in tests
+	getAtVersion func(context.Context, uuid.UUID, int) (*Document, error)
+	update       func(context.Context, uuid.UUID, map[string]interface{}) (*Document, error)
 }
 
 // NewDocumentStore creates a new DocumentStore
-func NewDocumentStore(queries *database.Queries) *DocumentStore {
-	return &DocumentStore{
+func NewDocumentStore(queries Queries) *DocumentStore {
+	s := &DocumentStore{
 		queries: queries,
 	}
+	// default helper implementations
+	s.getAtVersion = s.GetAtVersion
+	s.update = s.Update
+	return s
 }
 
 // Create creates a new document with the given content as version 1
-// TODO: Implement this method
 // 1. Create the document record in the database
 // 2. Marshal the content to JSON
 // 3. Create a patch from empty {} to the content (this is version 1)
@@ -58,49 +97,61 @@ func (s *DocumentStore) Create(ctx context.Context, name string, content map[str
 		return nil, fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	// TODO: Create the initial patch from {} to content
-	// Use createPatch() helper function below
-	// Store the patch using s.queries.CreateDocumentVersion()
+	// Store the initial doc version
+	patch, invertedPatch, err := createPatch([]byte("{}"), contentBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create patch: %w", err)
+	}
+	_, err = s.queries.CreateDocumentVersion(ctx, database.CreateDocumentVersionParams{
+		DocumentID:    doc.ID,
+		Version:       1,
+		Patch:         patch,
+		InvertedPatch: invertedPatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document version: %w", err)
+	}
 
-	_ = contentBytes // Use this
+	id, err := convertUUID(doc.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert document ID: %w", err)
+	}
 
 	return &Document{
-		ID:             doc.ID,
+		ID:             id,
 		Name:           doc.Name,
 		CurrentVersion: int(doc.CurrentVersion),
 		Content:        content,
-		CreatedAt:      doc.CreatedAt,
+		CreatedAt:      doc.CreatedAt.Time,
 	}, nil
 }
 
 // GetCurrent retrieves the current version of a document
-// TODO: Implement this method
 // 1. Get the document record to find the current version
 // 2. Call GetAtVersion with the current version
 func (s *DocumentStore) GetCurrent(ctx context.Context, id uuid.UUID) (*Document, error) {
-	// Get document metadata
-	doc, err := s.queries.GetDocument(ctx, id)
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
+	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
 
-	// TODO: Reconstruct the document at current version
-	// Call GetAtVersion(ctx, id, int(doc.CurrentVersion))
-
-	_ = doc // Use this
-
-	return nil, fmt.Errorf("not implemented")
+	return s.GetAtVersion(ctx, id, int(doc.CurrentVersion))
 }
 
 // GetAtVersion retrieves a document at a specific version
-// TODO: Implement this method
 // 1. Get all patches up to and including the target version
 // 2. Start with an empty document {}
 // 3. Apply each patch in order (version 1, 2, ..., N)
 // 4. Return the reconstructed document
 func (s *DocumentStore) GetAtVersion(ctx context.Context, id uuid.UUID, version int) (*Document, error) {
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
 	// Get document metadata
-	doc, err := s.queries.GetDocument(ctx, id)
+	doc, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
@@ -109,21 +160,47 @@ func (s *DocumentStore) GetAtVersion(ctx context.Context, id uuid.UUID, version 
 		return nil, fmt.Errorf("version %d not found", version)
 	}
 
-	// TODO: Get all versions up to the requested version
-	// Use s.queries.GetDocumentVersions(ctx, id)
+	versions, err := s.queries.GetDocumentVersions(ctx, docID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document versions: %w", err)
+	}
+
+	// sanity check - versions must be in order
+	for i, v := range versions {
+		if int(v.Version) != i+1 {
+			return nil, fmt.Errorf("invalid version history: expected version %d but got %d", i+1, v.Version)
+		}
+	}
+
 	// Filter to only include versions <= requested version
+	versions = versions[:version]
 
-	// TODO: Reconstruct the document by applying patches
-	// Start with base := []byte(`{}`)
-	// For each version, apply the patch using applyPatch() helper
+	// Reconstruct the document by applying patches
+	content := []byte(`{}`)
+	for _, v := range versions {
+		var err error
+		content, err = applyPatch(content, v.Patch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply patch for version %d: %w", v.Version, err)
+		}
+	}
 
-	_ = doc // Use this
+	var rawJson map[string]interface{}
+	err = json.Unmarshal(content, &rawJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal content: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	return &Document{
+		ID:             id,
+		Name:           doc.Name,
+		CurrentVersion: version,
+		Content:        rawJson,
+		CreatedAt:      doc.CreatedAt.Time,
+	}, nil
 }
 
 // Update updates a document with new content, creating a new version
-// TODO: Implement this method
 // 1. Get the current document content
 // 2. Compute the patch from current to new content
 // 3. Store the new version with the patch
@@ -147,74 +224,130 @@ func (s *DocumentStore) Update(ctx context.Context, id uuid.UUID, content map[st
 		return nil, fmt.Errorf("failed to marshal new content: %w", err)
 	}
 
-	// TODO: Create patch from current to new
-	// Use createPatch(currentBytes, newBytes)
+	forwardPatch, invertedPatch, err := createPatch(currentBytes, newBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create patch: %w", err)
+	}
 
-	// TODO: Create new version record
-	// newVersion := currentDoc.CurrentVersion + 1
-	// s.queries.CreateDocumentVersion(...)
+	if len(forwardPatch) == 0 {
+		// No changes, return current document
+		return currentDoc, nil
+	}
 
-	// TODO: Update document's current version
-	// s.queries.UpdateDocumentVersion(...)
+	newVersion := currentDoc.CurrentVersion + 1
+	docID := pgtype.UUID{}
+	setUUID(&docID, id)
+	_, err = s.queries.CreateDocumentVersion(ctx, database.CreateDocumentVersionParams{
+		DocumentID:    docID,
+		Version:       int32(newVersion),
+		Patch:         forwardPatch,
+		InvertedPatch: invertedPatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document version: %w", err)
+	}
 
-	_ = currentBytes // Use these
-	_ = newBytes
+	err = s.queries.UpdateDocumentVersion(ctx, database.UpdateDocumentVersionParams{
+		ID:             docID,
+		CurrentVersion: int32(newVersion),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document version: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	return &Document{
+		ID:             id,
+		Name:           currentDoc.Name,
+		CurrentVersion: newVersion,
+		Content:        content,
+		CreatedAt:      currentDoc.CreatedAt,
+	}, nil
 }
 
 // ListVersions returns the version history for a document
-// TODO: Implement this method
 // 1. Get all versions for the document
 // 2. Return version metadata (version number, created_at)
 func (s *DocumentStore) ListVersions(ctx context.Context, id uuid.UUID) (int, []VersionInfo, error) {
+	var docID pgtype.UUID
+	setUUID(&docID, id)
+
 	// Verify document exists
-	doc, err := s.queries.GetDocument(ctx, id)
+	_, err := s.queries.GetDocument(ctx, docID)
 	if err != nil {
 		return 0, nil, fmt.Errorf("document not found: %w", err)
 	}
 
-	// TODO: Get version history using s.queries.GetVersionHistory(ctx, id)
-	// Convert to []VersionInfo
+	rows, err := s.queries.GetVersionHistory(ctx, docID)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to get version history: %w", err)
+	}
 
-	_ = doc // Use this
+	var versions []VersionInfo
+	for _, v := range rows {
+		versions = append(versions, VersionInfo{
+			Version:   int(v.Version),
+			CreatedAt: v.CreatedAt.Time,
+		})
+	}
 
-	return 0, nil, fmt.Errorf("not implemented")
+	return len(versions), versions, nil
 }
 
 // Revert reverts a document to a specific version by creating a new version
 // with the content from the target version
-// TODO: Implement this method
 // 1. Get the document at the target version
 // 2. Create a new version with that content (like Update)
 func (s *DocumentStore) Revert(ctx context.Context, id uuid.UUID, targetVersion int) (*Document, error) {
-	// Get document at target version
 	targetDoc, err := s.GetAtVersion(ctx, id, targetVersion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get target version: %w", err)
 	}
 
-	// TODO: Update the document with the target content
-	// This creates a new version with the reverted content
-	// Use s.Update(ctx, id, targetDoc.Content)
+	doc, err := s.Update(ctx, id, targetDoc.Content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document: %w", err)
+	}
 
-	_ = targetDoc // Use this
-
-	return nil, fmt.Errorf("not implemented")
+	return doc, nil
 }
 
 // Helper functions for JSON patch operations
 
+// jsondiff Patch.String() returns results like "patch1\npatch2\npatch3", but
+// to store them in a jsonb column we need to convert it to a valid JSON array
+// eg. ["patch1","patch2","patch3"]
+func convertPatchToJsonArray(patch jsondiff.Patch) []byte {
+	lines := strings.Split(patch.String(), "\n")
+	return []byte(fmt.Sprintf("[%s]", strings.Join(lines, ",")))
+}
+
 // createPatch creates a JSON patch from base to target, returning both
 // the forward patch and inverted patch
-func createPatch(base, target []byte) (patch []byte, invertedPatch []byte, err error) {
-	// Use jsondiff to create an invertible patch
-
-	return patchBytes, invertedBytes, nil
+func createPatch(base, target []byte) ([]byte, []byte, error) {
+	patch, err := jsondiff.CompareJSON(base, target, jsondiff.Invertible())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create patch: %w", err)
+	}
+	if len(patch) == 0 {
+		// optimization: if there are no changes, return empty
+		return []byte(""), []byte(""), nil
+	}
+	invertedPatch, err := patch.Invert()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to invert patch: %w", err)
+	}
+	return convertPatchToJsonArray(patch), convertPatchToJsonArray(invertedPatch), nil
 }
 
 // applyPatch applies a JSON patch to a document
 func applyPatch(doc []byte, patchBytes []byte) ([]byte, error) {
-
-	return result, nil
+	patch, err := jsonpatch.DecodePatch(patchBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode patch: %w", err)
+	}
+	modified, err := patch.Apply(doc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply patch: %w", err)
+	}
+	return modified, nil
 }
